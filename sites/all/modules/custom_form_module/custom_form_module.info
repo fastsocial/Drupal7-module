@@ -1,0 +1,7 @@
+name = Custom form
+description = Makes a form with different stages.
+package = «User interface»
+core = 7.x
+version = «7.5»
+configure = admin/config/content/custom_form_module
+files[]= custom_form.module

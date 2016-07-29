@@ -1,0 +1,60 @@
+<?php
+function custom_form_module_uninstall()
+{
+	cache_clear_all('custom_form', 'cache', TRUE);
+	drupal_uninstall_schema('custom_form');
+	drupal_uninstall_schema('custom_form_stages');
+	drupal_uninstall_schema('custom_form_stages_fields');
+	menu_rebuild();
+}
+
+function custom_form_module_install()
+{
+	drupal_install_schema('custom_form');
+	drupal_install_schema('custom_form_stages');
+	drupal_install_schema('custom_form_stages_fields');
+    db_query("
+        ALTER TABLE
+            custom_form_stages_fields
+        ADD COLUMN
+            field_type enum('checkbox', 'textarea', 'textfield') DEFAULT'textfield'");
+}
+
+function custom_form_module_schema()
+{
+	$schema['custom_form'] = array(
+		'fields'      => array(
+			'form_id'    => array('type' => 'serial',  'size'=>'normal',  'not null' => TRUE),
+			'form_name'  => array('type' => 'varchar', 'length' => 255, 'not null' => TRUE),
+			'form_alias' => array('type' => 'varchar', 'length' => 255, 'not null' => TRUE),
+			'created_at' => array('type' => 'int', 'not null' => TRUE),
+			'updated_at' => array('type' => 'int', 'not null' => TRUE),
+		),
+		'primary key' => array('form_id')
+	);
+
+	$schema['custom_form_stages'] = array(
+        'fields'      => array(
+            'stage_id'   => array('type' => 'serial', 'size'=>'normal', 'not null' => TRUE),
+            'form_id'    => array('type' => 'int', 'not null' => TRUE),
+            'stage_name' => array('type' => 'varchar', 'length' => 255, 'not null' => TRUE),
+            'created_at' => array('type' => 'int', 'not null' => TRUE),
+            'updated_at' => array('type' => 'int', 'not null' => TRUE),
+        ),
+        'primary key' => array('stage_id')
+    );
+
+    $schema['custom_form_stages_fields'] = array(
+        'fields'      => array(
+            'field_id'    => array('type' => 'serial',  'size'=>'normal',  'not null' => TRUE),
+            'stage_id'    => array('type' => 'int', 'not null' => TRUE),
+            'field_name'  => array('type' => 'varchar', 'length' => 255, 'not null' => TRUE),
+            'field_title' => array('type' => 'varchar', 'length' => 255, 'not null' => TRUE),
+            'created_at'  => array('type' => 'int', 'not null' => TRUE),
+            'updated_at'  => array('type' => 'int', 'not null' => TRUE),
+        ),
+        'primary key' => array('field_id')
+    );
+
+	return $schema;
+}

@@ -1,0 +1,355 @@
+<?php
+
+function custom_form_module_block_info()
+{
+    $blocks['custom_form_module'] = array(
+        'info'  => t('RSS Feeds'),
+        'cache' => DRUPAL_CACHE_PER_ROLE, // по умолчанию
+    );
+
+    return $blocks;
+}
+
+/*
+В этом хуке мы описываем используемые блоки. У нас он будет только один и называться 'custom_form_module'. 'info' — это краткая информация о блоке, а 'cache' — правило кеширования. Подробнее см hook_block_info().
+Далее описываем hook_menu():
+*/
+
+
+function custom_form_module_menu()
+{
+
+    $items = array();
+
+    $items['admin/config/content/custom_form_module'] = array(
+        'title'            => 'Custom form module',
+        'description'      => 'Configure the forms and its stages.',
+        'page callback'    => 'customform_list',
+        'access arguments' => array('administer site configuration'),
+    );
+    $items['admin/config/content/custom_form_module/list'] = array(
+        'title'  => 'Custom form list',
+        'type'   => MENU_DEFAULT_LOCAL_TASK,
+        'weight' => 1,
+    );
+
+    // custom form add form
+    $items['admin/config/content/custom_form_module/add'] = array(
+        'title'            => 'Add custom form',
+        'page callback'    => 'drupal_get_form',
+        'page arguments'   => array('custom_form_module_form'),
+        'access arguments' => array('administer site configuration'),
+        'type'             => MENU_LOCAL_TASK,
+        'weight'           => 2,
+    );
+
+    // custom form edit form
+    $items['admin/config/content/custom_form_module/%rss/edit'] = array(
+        'title'            => 'Edit RSS',
+        'page callback'    => 'drupal_get_form',
+        'page arguments'   => array('custom_form_module_form', 4),
+        'access arguments' => array('administer site configuration'),
+        'type'             => MENU_CALLBACK,
+    );
+
+    // rss delete
+    $items['admin/config/content/custom_form_module/%rss/delete'] = array(
+        'title'            => 'Delete RSS',
+        'page callback'    => 'custom_form_module_delete',
+        'page arguments'   => array(4),
+        'access arguments' => array('administer site configuration'),
+        'type'             => MENU_CALLBACK,
+    );
+
+    $items['custom_form_module'] = array(
+        'title'            => 'RSS feeds',
+        'page callback'    => '_custom_form_module_page',
+        'access arguments' => array('access content'),
+    );
+
+    $items['custom_form_module/%rss/items'] = array(
+        'title'            => 'RSS feed content',
+        'page callback'    => 'rss_content',
+        'page arguments'   => array(1),
+        'access callback'  => TRUE,
+        'access arguments' => array('access content'),
+        'type'             => MENU_CALLBACK,
+    );
+
+
+    return $items;
+}
+
+/*
+В items мы задаем URL, его заголовок (title), описание (description), функция обработки (page callback), передаваемые аргументы (page arguments), параметры доступа (access arguments), тип (type) и «вес» (weight). Хотелось бы выделить page callback — drupal_get_from. Эта функция принимает в качестве параметра форму и выводит ее. В «page arguments => array(1)», в качестве аргумента мы передаем 1-ый элемент URL (отсчет идет от 0).
+
+Подробнее о hook_menu().
+
+Далее мы опишем форму, через которую мы будем добавлять и редактировать наши RSS-ленты:
+*/
+
+function custom_form_module_form($form, &$form_state, $rss = null)
+{
+    $form['name'] = array(
+        '#title'         => t('RSS feed name.'),
+        '#description'   => t('Insert RSS shortcut name'),
+        '#type'          => 'textfield',
+        '#default_value' => $rss ? $rss['name'] : '',
+        '#required'      => true,
+    );
+
+    $form['url'] = array(
+        '#title'         => t('RSS feed url.'),
+        '#description'   => t('Insert RSS url'),
+        '#type'          => 'textfield',
+        '#default_value' => $rss ? $rss['url'] : '',
+        '#required'      => true,
+    );
+
+    $form['submit'] = array(
+        '#type'  => 'submit',
+        '#value' => $rss ? t('Save') : t('Add'),
+    );
+
+    if ($rss) {
+        $form['id'] = array(
+            '#type'  => 'value',
+            '#value' => $rss['id'],
+        );
+    }
+
+    return $form;
+}
+
+/*
+Как Вы видите, если мы будем передавать в форму параметр $rss, форма будет понимать, добавляем мы новую ленту, или редактируем существующую. Функция t() (translate), позволяет локализировать модуль (об этом я расскажу чуть позже). Подробнее о hook_form().
+Далее необходимо описать hook_form_validate(), который будет обрабатывать данные, введенные в форму:
+*/
+
+function custom_form_module_form_validate($form, &$form_state)
+{
+    $url = $form_state['values']['url'];
+
+    if (fopen($url, "r")) {
+        libxml_use_internal_errors(true);
+        $rss_feed = simplexml_load_file($url);
+        if (empty($rss_feed)) {
+            form_set_error('url', t('URL is invalid!'));
+        }
+    } else {
+        form_set_error('url', t('URL is invalid!'));
+    }
+}
+
+/*
+Сначала мы получаем данные из $form_state, а потом их обрабатываем. Если что-то не так — выкидывается стандартный form_set_error(), в котором мы указываем имя поля формы и сообщение.
+Когда форма проходит валидацию, вызывается hook_form_submit():
+*/
+
+function custom_form_module_form_submit($form, &$form_state)
+{
+    $rss = array(
+        'name'       => $form_state['values']['name'],
+        'url'        => $form_state['values']['url'],
+        'created_at' => time(),
+        'updated_at' => time(),
+    );
+
+    // save edit data
+    if (isset($form_state['values']['id'])) {
+        $rss['id'] = $form_state['values']['id'];
+        drupal_write_record('customform', $rss, 'id');
+        drupal_set_message(t('RSS Feed saved!'));
+    } // add new data
+    else {
+        drupal_write_record('customform', $rss);
+        drupal_set_message(t('RSS Feed added!'));
+    }
+
+    drupal_goto('admin/config/content/custom_form_module');
+}
+
+/*
+Думаю тут все понятно. drupal_write_record() делает запись в БД, drupal_set_message() показывает системное сообщение, drupal_goto() перекидывает на заданный URL.
+Для того чтобы форма принимала не просто ID ленты ($rss), а ее данные, нужно определить hool_load():
+*/
+
+function rss_load($id)
+{
+    $rss = db_select('customform', 'n')
+        ->fields('n', array('id', 'name', 'url', 'created_at', 'updated_at'))
+        ->condition('n.id', $id)
+        ->execute()->fetchAssoc();
+
+    return $rss;
+}
+
+/*
+Теперь в качестве $rss в форму будет передаваться не число, а объект с данными.
+Далее следует реализовать функцию вывода страницы, на которой мы сможем проводить редактирование нашей таблицы RSS лент - rss_list():
+*/
+
+function customform_list()
+{
+    $header = array(
+        array('data' => t('Name')),
+        array('data' => t('URL')),
+        array('data' => t('Actions'))
+    );
+    $rss = db_select('customform', 'n')
+        ->fields('n', array('id', 'name', 'url'))
+        ->execute()->fetchAll();
+    $row = array();
+    if ($rss) {
+        foreach ($rss as $rss_feed) {
+            $actions = array(
+                l(t('edit'), 'admin/config/content/custom_form_module/' . $rss_feed->id . '/edit'),
+                l(t('delete'), 'admin/config/content/custom_form_module/' . $rss_feed->id . '/delete'),
+            );
+
+            $row [] = array(
+                array('data' => $rss_feed->name),
+                array('data' => $rss_feed->url),
+                array('data' => implode(' | ', $actions)),
+            );
+        }
+    }
+
+    return theme('table', array(
+        'header' => $header,
+        'rows'   => $row,
+    ));
+}
+
+/*
+Функция l() (link) — создает ссылку. Но главная функция — theme(). С ней Вы познакомитесь отдельно, т.к. она очень обширная и имеет множество полезных параметров.
+Ниже создадим функцию удаления записей custom_form_module_delete(): 
+*/
+
+function custom_form_module_delete($rss)
+{
+    $rss_deleted = db_delete('customform')
+        ->condition('id', $rss['id'])
+        ->execute();
+    drupal_set_message(t('RSS Feed deleted!'));
+    drupal_goto('admin/config/content/custom_form_module');
+}
+
+/*
+Без комментариев.
+Для удобства в дальнейшем я добавил функцию, которая будет возвращать данные, в зависимости от параметра (блок или страница). Вот ее содержимое:
+*/
+
+function rss_contents($display)
+{
+    $query = db_select('customform', 'n')
+        ->fields('n', array('id', 'name', 'url'))
+        ->orderBy('name', 'DESC');
+
+    if ($display == 'block') {
+        $query->range(0, 5);
+    }
+
+    return $query->execute();
+}
+
+/*
+Если в качестве параметра мы укажем 'block', то нам выведет лишь 5 записей.
+Далее реализуем хук вывода блока — hook_block_view():
+*/
+
+function custom_form_module_block_view($delta = '')
+{
+    $blocks = array();
+    switch ($delta) {
+        case 'custom_form_module':
+            $select = db_select('customform', 'tc');
+            $select->addField('tc', 'name');
+            $select->addField('tc', 'url');
+
+            $entries = $select->execute()->fetchAll();
+
+            $blocks['subject'] = t('List of URLs');
+            $blocks['content'] = theme('customform_block', array('urls' => $entries));
+    }
+
+    return $blocks;
+}
+
+/*
+Данный блок будет доступен в панели администрирования.
+Теперь напишем функцию отображения страницы, на которой будет список лент, при нажатии на которые, будет выводиться контент (в новой вкладке):
+*/
+
+function _custom_form_module_page()
+{
+    drupal_set_title(t('Custom form constructor'));
+
+    $result = rss_contents('page')->fetchAll();
+
+    if (!$result) {
+        $page_array['custom_form_module_arguments'] = array(
+            '#title'  => t('Custom form page'),
+            '#markup' => t('No customforms available'),
+        );
+
+        return $page_array;
+    } else {
+        $page_array = theme('customform_page', array('urls' => $result));
+
+        return $page_array;
+    }
+}
+
+/*
+… и страницу отображения контента: 
+*/
+
+function rss_content($rss)
+{
+    $url = $rss['url'];
+
+    libxml_use_internal_errors(true);
+    $rss_feed = simplexml_load_file($url);
+    if (!empty($rss_feed)) {
+        drupal_set_title($rss_feed->channel->title);
+        $page_array = theme('customform_content', array('items' => $rss_feed));
+
+        return $page_array;
+    } else {
+        $page_array['custom_form_module_arguments'] = array(
+            '#title'  => t('All posts from the last week'),
+            '#markup' => t('No posts available.'),
+        );
+
+        return $page_array;
+    }
+}
+
+/*
+Возможно Вы заметили, но страницы не будут выводиться. Я указал в функции theme() параметр 'customform_block' и 'customform_content'. Это созданные мной шаблоны. Сделаем hook_theme() для их инициализации:
+*/
+
+function custom_form_module_theme()
+{
+    return array(
+        'customform_block'   => array(
+            'variables' => array(
+                'urls' => NULL
+            ),
+            'template'  => 'customform-block',
+        ),
+        'customform_page'    => array(
+            'variables' => array(
+                'urls' => NULL
+            ),
+            'template'  => 'customform-page',
+        ),
+        'customform_content' => array(
+            'variables' => array(
+                'items' => NULL
+            ),
+            'template'  => 'customform-content',
+        )
+    );
+}
